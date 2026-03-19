@@ -1,0 +1,614 @@
+{
+  "name": "AI Blog QA Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "blog-qa-pipeline",
+        "options": {}
+      },
+      "id": "cd9eb400-ee3b-4411-8862-b6f669721358",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 2,
+      "webhookId": "753f8052-13fa-48fa-95d1-327fa1805c0e"
+    },
+    {
+      "parameters": {},
+      "id": "e8ad3f84-f870-4270-afc2-7c0f588b8b43",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "position": [
+        0,
+        160
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "owner",
+              "value": "DamianBob",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "repo",
+              "value": "ai-qa-blog-demo",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "filePath",
+              "value": "posts/demo-post.md",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "branch",
+              "value": "main",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4d743dc8-571b-48b3-a391-7eecd6edbc42",
+      "name": "Set: Config",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1088,
+        160
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://api.github.com/repos/' + $json.owner + '/' + $json.repo + '/contents/' + $json.filePath + '?ref=' + $json.branch }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "8da6dd9b-e859-438d-ad29-f96e749b3add",
+      "name": "GitHub GET File",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1312,
+        160
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qMqdWpj0tR0x8V8j",
+          "name": "GitHub PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = Buffer.from($input.first().json.content, 'base64').toString('utf-8');\nconst lines = raw.split('\\n');\nconst numbered = lines.map((l, i) => `${i + 1}: ${l}`).join('\\n');\nreturn [{ json: {\n  originalLines: lines,\n  numberedContent: numbered,\n  sha: $input.first().json.sha,\n  filePath: $input.first().json.path\n}}];"
+      },
+      "id": "9c4f9246-e72f-4494-8f7d-1b1203b113d8",
+      "name": "Decode & Prepare Lines",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1536,
+        160
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"anthropic/claude-sonnet-4-6\", max_tokens: 2000, messages: [{ role: \"system\", content: \"You are a professional blog post QA editor. Analyze the numbered blog post and identify ALL issues: grammar, spelling, tone, clarity, factual accuracy, structure, formatting. Return ONLY a JSON array (no markdown fences) where each element has: {\\\"line_range\\\": [start, end], \\\"issue_type\\\": \\\"grammar|spelling|tone|clarity|structure|formatting\\\", \\\"description\\\": \\\"brief description\\\"}. Be thorough.\" }, { role: \"user\", content: \"Numbered blog post to review:\\n\\n\" + $json.numberedContent }], temperature: 0.2 }) }}",
+        "options": {}
+      },
+      "id": "c84e15dc-4d24-4248-b885-89c4e8118432",
+      "name": "QA Agent (Sonnet 4.6)",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1744,
+        128
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nQVmXXP4wvNyORdI",
+          "name": "OpenRouter API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.choices[0].message.content.trim();\nlet issues = [];\ntry {\n  const cleaned = raw.replace(/^```json\\n?/,'').replace(/\\n?```$/,'');\n  issues = JSON.parse(cleaned);\n  if (!Array.isArray(issues)) issues = [];\n} catch(e) { issues = []; }\n\nconst decode = $('Decode & Prepare Lines').first().json;\nreturn [{ json: {\n  issues,\n  issueCount: issues.length,\n  originalLines: decode.originalLines,\n  sha: decode.sha,\n  filePath: decode.filePath,\n  numberedContent: decode.numberedContent\n}}];"
+      },
+      "id": "5f6deabc-755c-4e73-b35f-3a8d192c1340",
+      "name": "Parse QA JSON",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        2064,
+        160
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"anthropic/claude-sonnet-4-6\", max_tokens: 2000, messages: [{ role: \"system\", content: \"You are a professional blog post editor. Receive a numbered post and QA issues. Return ONLY a JSON array of patch objects (no markdown, no explanation). Each patch: {\\\"line_range\\\": [start_line, end_line], \\\"operation\\\": \\\"replace|insert_after|delete\\\", \\\"new_text\\\": \\\"replacement (omit for delete)\\\"}. Line numbers must be valid (1 to N), patches must not overlap.\" }, { role: \"user\", content: \"Numbered blog post:\\n\\n\" + $json.numberedContent + \"\\n\\nQA Issues to fix:\\n\" + JSON.stringify($json.issues, null, 2) }], temperature: 0.1 }) }}",
+        "options": {}
+      },
+      "id": "c5b41e58-8abf-4b36-8757-72a9028290f4",
+      "name": "Editor Agent (Sonnet 4.6)",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        2416,
+        160
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nQVmXXP4wvNyORdI",
+          "name": "OpenRouter API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.choices[0].message.content.trim();\nconst decode = $('Decode & Prepare Lines').first().json;\nconst qaJson = $('Parse QA JSON').first().json;\nconst totalLines = decode.originalLines.length;\nlet patches = [];\ntry {\n  const cleaned = raw.replace(/^```json\\n?/,'').replace(/\\n?```$/,'');\n  patches = JSON.parse(cleaned);\n  if (!Array.isArray(patches)) patches = [];\n} catch(e) { patches = []; }\n\nconst validPatches = patches.filter(p => {\n  const start = p.line_range?.[0] ?? p.line_number;\n  const end   = p.line_range?.[1] ?? p.line_number;\n  return Number.isInteger(start) && Number.isInteger(end)\n    && start >= 1 && end <= totalLines && start <= end\n    && ['replace','insert_after','delete'].includes(p.operation);\n});\n\nvalidPatches.sort((a, b) => {\n  const aStart = a.line_range?.[0] ?? a.line_number;\n  const bStart = b.line_range?.[0] ?? b.line_number;\n  return bStart - aStart;\n});\n\nreturn [{ json: {\n  validPatches,\n  skippedCount: patches.length - validPatches.length,\n  originalLines: decode.originalLines,\n  issues: qaJson.issues,\n  sha: decode.sha,\n  filePath: decode.filePath,\n  numberedContent: decode.numberedContent\n}}];"
+      },
+      "id": "91d04dbb-f468-4a31-95ae-aa1b69548b2a",
+      "name": "Parse & Validate Patches",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        2640,
+        160
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.validPatches.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1f0ec9e5-4f80-4dea-9dcc-c24c3c0cb4f5",
+      "name": "IF: Valid Patches?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        2864,
+        160
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "const lines = [...$input.first().json.originalLines];\nfor (const patch of $input.first().json.validPatches) {\n  const start = (patch.line_range?.[0] ?? patch.line_number) - 1;\n  const end   = (patch.line_range?.[1] ?? patch.line_number) - 1;\n  if (patch.operation === 'replace') {\n    lines.splice(start, end - start + 1, ...(patch.new_text ?? '').split('\\n'));\n  } else if (patch.operation === 'insert_after') {\n    lines.splice(end + 1, 0, ...(patch.new_text ?? '').split('\\n'));\n  } else if (patch.operation === 'delete') {\n    lines.splice(start, end - start + 1);\n  }\n}\nconst updatedContent = lines.join('\\n');\nreturn [{ json: {\n  updatedContent,\n  updatedContentB64: Buffer.from(updatedContent).toString('base64'),\n  issues: $input.first().json.issues,\n  validPatches: $input.first().json.validPatches,\n  skippedCount: $input.first().json.skippedCount,\n  sha: $input.first().json.sha,\n  filePath: $input.first().json.filePath\n}}];"
+      },
+      "id": "0ddc235c-c489-4037-8d4c-b4e2bb875700",
+      "name": "Apply Patches",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        3072,
+        48
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://api.github.com/repos/DamianBob/ai-qa-blog-demo/contents/' + $json.filePath }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ message: \"AI QA edit: \" + $json.validPatches.length + \" patches applied, \" + $json.skippedCount + \" skipped\", content: $json.updatedContentB64, sha: $json.sha, branch: \"main\" }) }}",
+        "options": {}
+      },
+      "id": "04c08a04-1d92-4aa5-8676-ada74f555652",
+      "name": "GitHub Commit File",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        3296,
+        48
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qMqdWpj0tR0x8V8j",
+          "name": "GitHub PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/DamianBob/ai-qa-blog-demo/contents/posts/qa_report.json",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "8bbb988a-45d4-47f5-9242-4c365957f273",
+      "name": "Get QA Report SHA",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        3520,
+        48
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qMqdWpj0tR0x8V8j",
+          "name": "GitHub PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const applyNode = $('Apply Patches').first().json;\nconst reportObj = {\n  timestamp: new Date().toISOString(),\n  issueCount: applyNode.issues.length,\n  issues: applyNode.issues,\n  patchesApplied: applyNode.validPatches.length,\n  patchesSkipped: applyNode.skippedCount,\n  patches: applyNode.validPatches\n};\nconst content = Buffer.from(JSON.stringify(reportObj, null, 2)).toString('base64');\nconst qaReportSha = $input.first().json.sha ?? null;\nconst body = {\n  message: 'QA report: ' + applyNode.issues.length + ' issues found',\n  content,\n  branch: 'main'\n};\nif (qaReportSha) body.sha = qaReportSha;\nreturn [{ json: { qaReportBody: JSON.stringify(body) } }];"
+      },
+      "id": "a9632d5d-7361-45c5-a051-39571d7bbbd1",
+      "name": "Prepare QA Report",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        3744,
+        48
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://api.github.com/repos/DamianBob/ai-qa-blog-demo/contents/posts/qa_report.json",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.parse($json.qaReportBody) }}",
+        "options": {}
+      },
+      "id": "c1b850b8-dc0f-4413-ab96-619509e3063d",
+      "name": "GitHub Commit QA Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        3952,
+        48
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qMqdWpj0tR0x8V8j",
+          "name": "GitHub PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b1",
+              "name": "status",
+              "value": "skipped",
+              "type": "string"
+            },
+            {
+              "id": "b2",
+              "name": "reason",
+              "value": "No valid patches returned by editor agent",
+              "type": "string"
+            },
+            {
+              "id": "b3",
+              "name": "issueCount",
+              "value": "={{ $json.issueCount }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "45ec742a-7c70-452d-ad66-f4e7d0c7a8d9",
+      "name": "Skip & Flag",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        3072,
+        320
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/DamianBob/ai-qa-blog-demo/contents/posts/demo-post.md",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "d0c13df7-fb0a-407d-b5bd-df0cc5be20b8",
+      "name": "Get Reset SHA",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        432,
+        160
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qMqdWpj0tR0x8V8j",
+          "name": "GitHub PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://api.github.com/repos/DamianBob/ai-qa-blog-demo/contents/posts/demo-post.md",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ message: \"Reset demo post to original (intentional issues)\", content: \"IyBXaHkgQXJ0aWZpY2lhbCBJbnRlbGxpZ2VuY2UgaXMgQ2hhbmdpbmcgRXZlcnl0aGluZyBpbiAyMDI0CgpBcnRpZmljaWFsIGludGVsbGlnZW5jZSBpcyBhIHRlY2hub2xvZ3kgdGhhdCBoYXMgYmVjYW1lIHZlcnkgaW1wb3J0YW50IGluIHJlY2VudCB5ZWFycy4gSXQgaXMgdXNlZCBpbiBtYW55IGRpZmZlcmVudCBhcmVhcyBzdWNoIGFzIGhlYWx0aGNhcmUsIGZpbmFuY2UsIGFuZCB0cmFuc3BvcnRhdGlvbi4gTWFueSBleHBlcnRzIGJlbGlldmVzIHRoYXQgQUkgd2lsbCBjb250aW51ZSB0byBncm93IGFuZCBjaGFuZ2UgaG93IHdlIGxpdmUgYW5kIHdvcmsuCgojIyBUaGUgSW1wYWN0IG9uIEhlYWx0aGNhcmUKCkluIHRoZSBoZWFsdGhjYXJlIGluZHVzdHJ5IEFJIGlzIGJlaW5nIHVzZWQgdG8gaGVscCBkb2N0b3JzIGFuZCBudXJzZXMgZG8gdGhlaXIgam9icy4gRm9yIGV4YW1wbGUsIEFJIGNhbiBhbmFseXplIG1lZGljYWwgaW1hZ2VzIGFuZCBpZGVudGlmeSBkaXNlYXNlcy4gVGhpcyBpcyB2ZXJ5IGhlbHBmdWwgYmVjYXVzZSBpdCBjYW4gaGVscCBkb2N0b3JzIGNhdGNoIGRpc2Vhc2VzIGVhcmxpZXIgYW5kIHRyZWF0IHBhdGllbnRzIGJldHRlci4KCk9uZSBzdHVkeSBzaG93ZWQgdGhhdCBBSSB3YXMgYWJsZSB0byBkZXRlY3QgYnJlYXN0IGNhbmNlciB3aXRoIDk0LjUlIGFjY3VyYWN5IHdoaWNoIGlzIG1vcmUgYWNjdXJhdGUgdGhhbiBodW1hbiBkb2N0b3JzLiBIb3dldmVyLCBzb21lIHBlb3BsZSB3b3JyaWVzIGFib3V0IHByaXZhY3kgYW5kIHdoZXRoZXIgQUkgd2lsbCByZXBsYWNlIGh1bWFuIGRvY3RvcnMgZW50aXJlbHkuIFRoZXNlIGFyZSB2YWxpZCBjb25jZXJucyBidXQgbW9zdCBleHBlcnRzIHRoaW5rcyB0aGF0IEFJIHdpbGwgd29yayBhbG9uZ3NpZGUgaHVtYW5zIG5vdCByZXBsYWNlIHRoZW0uCgojIyBCZW5lZml0cyBvZiBBSSBpbiBGaW5hbmNlCgpUaGUgZmluYW5jaWFsIHNlY3RvciBoYXZlIHNlZW4gc2lnbmlmaWNhbnQgaW1wcm92ZW1lbnRzIGR1ZSB0byBBSS4gQmFua3MgdXNlIEFJIHRvIGRldGVjdCBmcmF1ZCBpbiByZWFsLXRpbWUgd2hpY2ggc2F2ZXMgYmlsbGlvbnMgb2YgZG9sbGFycyBldmVyeSB5ZWFyLiBBZGRpdGlvbmFsbHksIEFJIGFsZ29yaXRobXMgY2FuIHByZWRpY3QgbWFya2V0IHRyZW5kcyB3aGljaCBoZWxwIGludmVzdG9ycyBtYWtlIG1vcmUgYmV0dGVyIGRlY2lzaW9ucy4KCkhvd2V2ZXIgdGhlaXIgYXJlIGFsc28gcmlza3MuIElmIEFJIHN5c3RlbXMgbWFrZSBtaXN0YWtlcyB0aGV5IGNhbiBjYXVzZSBsYXJnZSBzY2FsZSBmaW5hbmNpYWwgcHJvYmxlbXMuIFRoZSAyMDEwIEZsYXNoIENyYXNoIGlzIGEgZXhhbXBsZSBvZiBob3cgYXV0b21hdGVkIHN5c3RlbXMgY2FuIGdvIHdyb25nLiBTbyB3ZSBuZWVkIHRvIGJlIGNhcmVmdWxsIGFib3V0IGhvdyB3ZSB1c2UgQUkgaW4gZmluYW5jZS4KCiMjIFRyYW5zcG9ydGF0aW9uIGFuZCBTZWxmLURyaXZpbmcgQ2FycwoKVGhlIHRyYW5zcG9ydGF0aW9uIHNlY3RvciBhcmUgYWxzbyBiZWluZyB0cmFuc2Zvcm1lZC4gQ29tcGFuaWVzIGxpa2UgVGVzbGEsIFdheW1vIGFuZCBVYmVyIGFyZSB3b3JraW5nIG9uIHNlbGYtZHJpdmluZyBjYXJzIHRoYXQgZG9udCBuZWVkIGh1bWFuIGRyaXZlcnMuIFRoaXMgdGVjaG5vbG9neSBjb3VsZCByZWR1Y2UgYWNjaWRlbnRzIGFuZCBtYWtlIHRyYW5zcG9ydGF0aW9uIG1vcmUgZWZmaWNlbnQuCgpTZWxmLWRyaXZpbmcgY2FycyB1c2Ugc2Vuc29ycyBjYW1lcmFzIGFuZCBBSSBhbGdvcml0aG1zIHRvIG5hdmlnYXRlIHJvYWRzLiBUaGV5IGNhbiByZWFjdCBmYXN0ZXIgdGhhbiBodW1hbnMgYW5kIGRvbnQgZ2V0IHRpcmVkIG9yIGRpc3RyYWN0ZWQuIEJ1dCB0aGVyZSBhcmUgc3RpbGwgYWxvdCBvZiBjaGFsbGVuZ2VzIHRvIHNvbHZlIGJlZm9yZSBzZWxmLWRyaXZpbmcgY2FycyBhcmUgd2lkZXNwcmVhZC4KCiMjIFRoZSBGdXR1cmUgb2YgQUkKCkluIGNvbmNsdXNpb24sIEFJIGlzIGEgdmVyeSBwb3dlcmZ1bCB0ZWNobm9sb2d5IHRoYXQgaGFzIG1hbnkgcG90ZW50aWFsIGJlbmVmaXRzLiBJdCBpcyBhbHJlYWR5IGNoYW5naW5nIG1hbnkgaW5kdXN0cmllcyBhbmQgd2lsbCBjb250aW51ZSB0byBkbyBzbyBpbiB0aGUgZnV0dXJlLiBXZSBzaG91bGQgZW1icmFjZSBBSSBidXQgYWxzbyBiZSBhd2FyZSBvZiB0aGUgY2hhbGxlbmdlcyBhbmQgcmlza3MuCgpUaGUgbW9zdCBpbXBvcnRhbnRlc3QgdGhpbmcgaXMgdG8gbWFrZSBzdXJlIHRoYXQgQUkgaXMgZGV2ZWxvcGVkIGFuZCB1c2VkIGluIGEgd2F5IHRoYXQgYmVuZWZpdHMgYWxsIHBlb3BsZSBub3QganVzdCBhIGZldy4gV2UgbmVlZCBwb2xpY2llcyBhbmQgcmVndWxhdGlvbnMgdG8gZW5zdXJlIHRoYXQgQUkgaXMgc2FmZSBldGhpY2FsIGFuZCBmYWlyLiBJZiB3ZSBkbyB0aGlzIHRoZW4gQUkgY291bGQgaGVscCB1cyBzb2x2ZSBzb21lIG9mIHRoZSB3b3JsZHMgYmlnZ2VzdCBwcm9ibGVtcy4K\", sha: $json.sha, branch: \"main\" }) }}",
+        "options": {}
+      },
+      "id": "f1f01b6b-c8fe-4864-a1f2-bf9ef8edf436",
+      "name": "Reset to Original",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        656,
+        160
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qMqdWpj0tR0x8V8j",
+          "name": "GitHub PAT"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Manual Trigger": [
+      {
+        "json": {},
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Reset SHA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Reset SHA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set: Config": {
+      "main": [
+        [
+          {
+            "node": "GitHub GET File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub GET File": {
+      "main": [
+        [
+          {
+            "node": "Decode & Prepare Lines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decode & Prepare Lines": {
+      "main": [
+        [
+          {
+            "node": "QA Agent (Sonnet 4.6)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "QA Agent (Sonnet 4.6)": {
+      "main": [
+        [
+          {
+            "node": "Parse QA JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse QA JSON": {
+      "main": [
+        [
+          {
+            "node": "Editor Agent (Sonnet 4.6)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Editor Agent (Sonnet 4.6)": {
+      "main": [
+        [
+          {
+            "node": "Parse & Validate Patches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Validate Patches": {
+      "main": [
+        [
+          {
+            "node": "IF: Valid Patches?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Valid Patches?": {
+      "main": [
+        [
+          {
+            "node": "Apply Patches",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip & Flag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Patches": {
+      "main": [
+        [
+          {
+            "node": "GitHub Commit File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub Commit File": {
+      "main": [
+        [
+          {
+            "node": "Get QA Report SHA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get QA Report SHA": {
+      "main": [
+        [
+          {
+            "node": "Prepare QA Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare QA Report": {
+      "main": [
+        [
+          {
+            "node": "GitHub Commit QA Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Reset SHA": {
+      "main": [
+        [
+          {
+            "node": "Reset to Original",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reset to Original": {
+      "main": [
+        [
+          {
+            "node": "Set: Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "ff68473a-8933-43f9-a719-c2f9da3faaa5",
+  "meta": {
+    "instanceId": "769994c33615bb74b1905e15635883030adccfb7c07239ca99a08c6ecb04ae4b"
+  },
+  "id": "zadDEU66iTk0AfXB",
+  "tags": []
+}
