@@ -8,8 +8,8 @@
 
 | Level | Meaning |
 |-------|---------|
-| 🔴 **P0** | Silent data corruption or undiagnosable crash — must be fixed |
-| 🟡 **P1** | Wrong output with no crash — degrades quality silently |
+| 🔴 **P0** | Silent data corruption or undiagnosable crash , need specific attention, must be fixed |
+| 🟡 **P1** | Wrong output with no crash , degrades quality over time, must be supervised from time to time |
 | 🟢 **P2** | Nice-to-have robustness improvement |
 
 ---
@@ -452,14 +452,6 @@ Combined with the A2 guard, the 402 will surface a clear error rather than a cry
 | C2 | Token Budget | `max_tokens` accidentally removed | 🟢 P2 | Documented |
 
 ---
-
-## Implementation Order
-
-Fix in this sequence to avoid compounding failures during testing:
-
-1. **Node 4** — G1 (file not found), G2 (SHA guard). These are the earliest possible crash points.
-2. **Parse QA JSON** — A2 (API error guard), A1 (truncation recovery), A3+A4 (`extractJSON`), A5 (object unwrap), A6 (empty response), T1 (node reference null).
-3. **Parse & Validate Patches** — A2, A1, A3+A4, A5, T2 (`originalLines` guard), L1 (overlap sweep), L2 (reversed range swap).
 4. **Apply Patches** — L5 (strip echoed line-number prefixes from `new_text`).
 5. **GitHub Commit File** — G3 (409 detection via downstream guard node).
 6. **QA Agent + Editor Agent nodes** — Enable "Retry on Fail" (3 retries, 2s delay) for transient 5xx.
