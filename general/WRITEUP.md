@@ -254,9 +254,17 @@ Check results at: https://github.com/DamianBob/ai-qa-blog-demo
 
 ---
 
-## Credentials
+## Credentials for setup needed
+
+GitHub PAT key
+Openrouter API key
+
 
 | Credential | Type | Used by |
 |---|---|---|
 | `GitHub PAT` | HTTP Header Auth (`Authorization: token …`) | Get Reset SHA, Reset to Original, GitHub GET File, GitHub Commit File, Get QA Report SHA, GitHub Commit QA Report |
 | `OpenRouter API Key` | HTTP Header Auth (`Authorization: Bearer …`) | QA Agent, Editor Agent |
+
+## Time spent
+
+Time spent making this workflow 3-4 hours
